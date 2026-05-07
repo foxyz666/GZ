@@ -2,17 +2,11 @@ import { ref, set, onValue, push, remove, get, update, onDisconnect } from 'fire
 import { db } from '../firebase'
 
 const GAME_LOBBY_PATHS = {
-  'rps-tactic': 'lobby/rps-tactic',
-  'pictionary': 'lobby/pictionary',
-  'memory': 'lobby/memory',
-  'finish-sentence': 'lobby/finish-sentence',
+  'skribbl': 'lobby/skribbl',
 }
 
 const GAME_ROOM_PATHS = {
-  'rps-tactic': 'rps-rooms',
-  'pictionary': 'pictionary-rooms',
-  'memory': 'memory-rooms',
-  'finish-sentence': 'sentence-rooms',
+  'skribbl': 'skribbl-rooms',
 }
 
 export function getLobbyPath(gameId) {

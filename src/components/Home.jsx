@@ -1,87 +1,30 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { Zap, Palette, Brain, MessageCircle, ChevronRight, Users } from 'lucide-react'
+import { Palette, ChevronRight, Users } from 'lucide-react'
 import { listenForPlayerCount } from '../utils/matchmaking'
 
 const games = [
   {
-    id: 'rps-tactic',
-    title: 'Rock Paper Scissors',
-    subtitle: 'TACTIC',
-    description: 'Nu doar alegi random — ai energie, skill-uri și strategie. Un mini card game bazat pe clasicul RPS.',
-    icon: Zap,
-    color: 'purple',
-    gradient: 'from-purple-600 to-violet-800',
-    glowClass: 'glow-purple',
-    path: '/rps-tactic',
-    features: ['Previziune', 'Dublu Atac', 'Energie'],
-  },
-  {
-    id: 'pictionary',
-    title: 'Desenează & Ghicește',
-    subtitle: 'PICTIONARY',
-    description: 'Un jucător desenează, altul ghicește. Canvas comun cu chat live pentru răspunsuri.',
+    id: 'skribbl',
+    title: 'Skribbl de prieteni',
+    subtitle: 'SKRIBBL',
+    description: 'Desenează pe rând și ghiciți cuvintele. Camere private sau matchmaking rapid.',
     icon: Palette,
     color: 'blue',
     gradient: 'from-blue-600 to-cyan-800',
     glowClass: 'glow-blue',
-    path: '/pictionary',
-    features: ['Canvas comun', 'Chat live', 'Timer + Scor'],
-  },
-  {
-    id: 'memory',
-    title: 'Memorie vs Memorie',
-    subtitle: 'MEMORY BATTLE',
-    description: 'Secvență de culori și sunete care crește constant. Cine greșește primul pierde!',
-    icon: Brain,
-    color: 'green',
-    gradient: 'from-green-600 to-emerald-800',
-    glowClass: 'glow-green',
-    path: '/memory',
-    features: ['Secvență crescătoare', 'Sunete', 'Battle'],
-  },
-  {
-    id: 'finish-sentence',
-    title: 'Finish the Sentence',
-    subtitle: 'IMPROV COMEDY',
-    description: 'Se începe o propoziție și fiecare continuă pe rând. Devine haotic și amuzant!',
-    icon: MessageCircle,
-    color: 'orange',
-    gradient: 'from-orange-600 to-amber-800',
-    glowClass: 'glow-orange',
-    path: '/finish-sentence',
-    features: ['Improv', 'Multiplayer', 'Fun'],
+    path: '/skribbl',
+    features: ['Cuvinte la alegere', 'Chat live', 'Timer + Scor'],
   },
 ]
 
 const colorMap = {
-  purple: {
-    bg: 'bg-purple-500/20',
-    text: 'text-purple-300',
-    border: 'border-purple-500/30',
-    hoverBg: 'hover:bg-purple-500/30',
-    tag: 'bg-purple-500/30 text-purple-200',
-  },
   blue: {
     bg: 'bg-blue-500/20',
     text: 'text-blue-300',
     border: 'border-blue-500/30',
     hoverBg: 'hover:bg-blue-500/30',
     tag: 'bg-blue-500/30 text-blue-200',
-  },
-  green: {
-    bg: 'bg-green-500/20',
-    text: 'text-green-300',
-    border: 'border-green-500/30',
-    hoverBg: 'hover:bg-green-500/30',
-    tag: 'bg-green-500/30 text-green-200',
-  },
-  orange: {
-    bg: 'bg-orange-500/20',
-    text: 'text-orange-300',
-    border: 'border-orange-500/30',
-    hoverBg: 'hover:bg-orange-500/30',
-    tag: 'bg-orange-500/30 text-orange-200',
   },
 }
 
@@ -104,7 +47,7 @@ export default function Home() {
           GAME ZONE
         </h1>
         <p className="text-lg text-gray-400 max-w-2xl mx-auto">
-          Alege un joc și distrează-te! Fiecare joc are mecanici unice și multiplayer live.
+          Joc tip skribbl pentru prieteni: desenezi, ghicești și schimbi runde rapid.
         </p>
       </div>
 
@@ -158,7 +101,7 @@ export default function Home() {
 
       <div className="text-center mt-16">
         <p className="text-gray-500 text-sm">
-          Mai multe jocuri în curând... 🎮
+          Mai multe îmbunătățiri în curând... 🎮
         </p>
       </div>
     </div>

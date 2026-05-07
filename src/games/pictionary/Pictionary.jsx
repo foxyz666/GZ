@@ -1,24 +1,27 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { ref, set, onValue, onChildAdded, push, remove, get } from 'firebase/database'
+import { ref, set, onValue, onChildAdded, push, remove, get, update } from 'firebase/database'
 import { db } from '../../firebase'
 import { joinLobby, leaveLobby, listenForLobbyMatch, setLobbyMatch } from '../../utils/matchmaking'
-import { Palette, Send, Clock, Users, Eraser, RotateCcw, Pencil, Search } from 'lucide-react'
+import { Palette, Send, Clock, Eraser, RotateCcw, Search } from 'lucide-react'
+
+const GAME_ID = 'skribbl'
+const ROOMS_PATH = 'skribbl-rooms'
+const ROUND_TIME = 60
+const WORD_OPTIONS_COUNT = 3
 
 const WORDS_RO = [
-  'soare', 'pisică', 'casă', 'copac', 'mașină', 'floare', 'câine', 'carte',
-  'avion', 'munte', 'râu', 'pește', 'lună', 'stea', 'ploaie', 'zăpadă',
-  'ingeț', 'balon', 'tort', 'umbrelă', 'ochelari', 'ceas', 'bicicletă', 'chitară',
-  'robot', 'castel', 'dragon', 'unicorn', 'vulcan', 'insulă', 'păianjen', 'fluture',
-  'elefant', 'girafă', 'pinguin', 'dinozaur', 'rachetă', 'telescop', 'ancoră', 'corabie',
-  'trompetă', 'pian', 'tobă', 'vioară', 'foc', 'apă', 'vânt', 'nor',
-  'curcubeu', 'diamant', 'coroană', 'sabie', 'scut', 'arc', 'săgeată', 'lacăt',
-  'cheie', 'lampă', 'lumânare', 'oglindă', 'perie', 'foarfece', 'ac', 'fir',
+  'soare', 'pisica', 'casa', 'copac', 'masina', 'floare', 'caine', 'carte',
+  'avion', 'munte', 'rau', 'peste', 'luna', 'stea', 'ploaie', 'zapada',
+  'inghet', 'balon', 'tort', 'umbrela', 'ochelari', 'ceas', 'bicicleta', 'chitara',
+  'robot', 'castel', 'dragon', 'unicorn', 'vulcan', 'insula', 'paianjen', 'fluture',
+  'elefant', 'girafa', 'pinguin', 'dinozaur', 'racheta', 'telescop', 'ancora', 'corabie',
+  'trompeta', 'pian', 'toba', 'vioara', 'foc', 'apa', 'vant', 'nor',
+  'curcubeu', 'diamant', 'coroana', 'sabie', 'scut', 'arc', 'sageata', 'lacat',
+  'cheie', 'lampa', 'lumanare', 'oglinda', 'perie', 'foarfeca', 'ac', 'fir',
 ]
 
 const COLORS = ['#ffffff', '#ff0000', '#ff6600', '#ffff00', '#00ff00', '#0066ff', '#9900ff', '#ff00ff', '#000000', '#8B4513']
 const BRUSH_SIZES = [3, 6, 12, 20]
-
-const ROUND_TIME = 60
 
 const normalizeText = (value = '') => {
   const base = value
@@ -32,7 +35,15 @@ const normalizeText = (value = '') => {
   return base.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
 }
 
-export default function Pictionary() {
+const getWordOptions = () => {
+  const options = new Set()
+  while (options.size < WORD_OPTIONS_COUNT) {
+    options.add(WORDS_RO[Math.floor(Math.random() * WORDS_RO.length)])
+  }
+  return Array.from(options)
+}
+
+export default function Skribbl() {
   const [playerId] = useState(() => 'p_' + Math.random().toString(36).substr(2, 9))
   const [playerName, setPlayerName] = useState('')
   const [joined, setJoined] = useState(false)
@@ -41,195 +52,23 @@ export default function Pictionary() {
   const [gameState, setGameState] = useState(null)
   const [guess, setGuess] = useState('')
   const [chatMessages, setChatMessages] = useState([])
-  const [currentWord, setCurrentWord] = useState('')
-  const [timeLeft, setTimeLeft] = useState(ROUND_TIME)
   const [isDrawing, setIsDrawing] = useState(false)
+  const [wordOptions, setWordOptions] = useState([])
+  const [customWord, setCustomWord] = useState('')
   const [brushColor, setBrushColor] = useState('#ffffff')
   const [brushSize, setBrushSize] = useState(6)
   const [isErasing, setIsErasing] = useState(false)
+  const [searching, setSearching] = useState(false)
+
   const canvasRef = useRef(null)
   const drawingRef = useRef(false)
   const lastPosRef = useRef(null)
   const timerRef = useRef(null)
-  const [searching, setSearching] = useState(false)
-  const [customWord, setCustomWord] = useState('')
-  const advanceRoundRef = useRef(0)
   const matchUnsubRef = useRef(null)
   const lastClearRef = useRef(0)
   const canvasReadyRef = useRef(false)
   const strokesCacheRef = useRef([])
-
-  const getRandomWord = () => WORDS_RO[Math.floor(Math.random() * WORDS_RO.length)]
-
-  const createRoom = async () => {
-    if (!playerName.trim()) return
-    const word = getRandomWord()
-    const roomRef = push(ref(db, 'pictionary-rooms'))
-    const newRoomId = roomRef.key
-    const initialState = {
-      status: 'waiting',
-      host: playerId,
-      hostName: playerName,
-      guest: '',
-      guestName: '',
-      hostScore: 0,
-      guestScore: 0,
-      currentWord: word,
-      drawer: playerId,
-      round: 1,
-      timeLeft: ROUND_TIME,
-      guessedCorrectly: false,
-    }
-    await set(roomRef, initialState)
-    setRoomId(newRoomId)
-    setIsHost(true)
-    setJoined(true)
-    setCurrentWord(word)
-    setIsDrawing(true)
-  }
-
-  const joinRoom = async () => {
-    if (!playerName.trim() || !roomId.trim()) return
-    const roomRef = ref(db, `pictionary-rooms/${roomId}`)
-    const snapshot = await get(roomRef)
-    if (!snapshot.exists()) {
-      alert('Camera nu există!')
-      return
-    }
-    const data = snapshot.val()
-    if (data.guest) {
-      alert('Camera este plină!')
-      return
-    }
-    await set(ref(db, `pictionary-rooms/${roomId}/guest`), playerId)
-    await set(ref(db, `pictionary-rooms/${roomId}/guestName`), playerName)
-    await set(ref(db, `pictionary-rooms/${roomId}/status`), 'playing')
-    setJoined(true)
-    setIsHost(false)
-    setIsDrawing(false)
-  }
-
-  const playSolo = () => {
-    if (!playerName.trim()) return
-    const word = getRandomWord()
-    setRoomId('solo')
-    setIsHost(true)
-    setJoined(true)
-    setCurrentWord(word)
-    setIsDrawing(true)
-    setGameState({
-      status: 'playing',
-      host: playerId,
-      hostName: playerName,
-      guest: '',
-      guestName: 'Ghicitor',
-      hostScore: 0,
-      guestScore: 0,
-      currentWord: word,
-      drawer: playerId,
-      round: 1,
-      timeLeft: ROUND_TIME,
-      guessedCorrectly: false,
-    })
-  }
-
-  useEffect(() => {
-    if (!joined || roomId === 'solo') return
-    const roomRef = ref(db, `pictionary-rooms/${roomId}`)
-    const unsubscribe = onValue(roomRef, (snapshot) => {
-      if (snapshot.exists()) {
-        const data = snapshot.val()
-        setGameState(data)
-        setIsDrawing(data.drawer === playerId)
-        setCurrentWord(data.drawer === playerId ? data.currentWord : '')
-      }
-    })
-    return () => unsubscribe()
-  }, [joined, roomId, playerId])
-
-  useEffect(() => {
-    if (!joined || roomId === 'solo') return
-    const chatRef = ref(db, `pictionary-rooms/${roomId}/chat`)
-    const unsubscribe = onValue(chatRef, (snapshot) => {
-      if (snapshot.exists()) {
-        const msgs = Object.values(snapshot.val())
-        setChatMessages(msgs)
-        const lastMsg = msgs[msgs.length - 1]
-        if (lastMsg && lastMsg.correct) {
-          handleCorrectGuess()
-        }
-      } else {
-        setChatMessages([])
-      }
-    })
-    return () => unsubscribe()
-  }, [joined, roomId, handleCorrectGuess])
-
-  const handleCorrectGuess = useCallback(() => {
-    if (roomId === 'solo' || roomId === 'ai') return
-    if (playerId !== gameState?.host) return
-    const chatRef = ref(db, `pictionary-rooms/${roomId}/chat`)
-    push(chatRef, {
-      player: 'Sistem',
-      message: '✅ Cuvânt ghicit corect! Runda se termină...',
-      correct: false,
-      system: true,
-      timestamp: Date.now(),
-    })
-  }, [roomId, playerId, gameState?.host])
-
-  const sendGuess = async () => {
-    if (!guess.trim()) return
-    if (roomId === 'solo') {
-      const isCorrect = normalizeText(guess) === normalizeText(currentWord)
-      setChatMessages(prev => [...prev, {
-        player: playerName,
-        message: guess,
-        correct: isCorrect,
-        timestamp: Date.now(),
-      }])
-      if (isCorrect) {
-        setChatMessages(prev => [...prev, {
-          player: 'Sistem',
-          message: '✅ Corect! Cuvântul era: ' + currentWord,
-          system: true,
-          timestamp: Date.now(),
-        }])
-        clearInterval(timerRef.current)
-        setTimeout(() => nextRoundSolo(), 500)
-      }
-      setGuess('')
-      return
-    }
-    const isCorrect = normalizeText(guess) === normalizeText(gameState?.currentWord || '')
-    await push(ref(db, `pictionary-rooms/${roomId}/chat`), {
-      player: playerName,
-      message: isCorrect ? '✅ A ghicit!' : guess,
-      correct: isCorrect,
-      timestamp: Date.now(),
-    })
-    if (isCorrect) {
-      const myScoreKey = isHost ? 'hostScore' : 'guestScore'
-      await set(ref(db, `pictionary-rooms/${roomId}/${myScoreKey}`), (isHost ? gameState.hostScore : gameState.guestScore) + 1)
-      await set(ref(db, `pictionary-rooms/${roomId}/guessedCorrectly`), true)
-    }
-    setGuess('')
-  }
-
-  const applyCustomWord = async () => {
-    if (!isDrawing) return
-    const word = customWord.trim()
-    if (!word) return
-    if (roomId === 'solo') {
-      setCurrentWord(word)
-      setGameState(prev => (prev ? { ...prev, currentWord: word } : prev))
-      setCustomWord('')
-      return
-    }
-    await set(ref(db, `pictionary-rooms/${roomId}/currentWord`), word)
-    await set(ref(db, `pictionary-rooms/${roomId}/guessedCorrectly`), false)
-    setCustomWord('')
-  }
+  const advanceRoundRef = useRef(0)
 
   const clearCanvasLocal = useCallback(() => {
     const canvas = canvasRef.current
@@ -242,93 +81,198 @@ export default function Pictionary() {
 
   const clearCanvasForAll = useCallback(async () => {
     clearCanvasLocal()
-    if (roomId && roomId !== 'solo') {
-      await remove(ref(db, `pictionary-rooms/${roomId}/strokes`))
-      await set(ref(db, `pictionary-rooms/${roomId}/clearAt`), Date.now())
-    }
+    if (!roomId) return
+    await remove(ref(db, `${ROOMS_PATH}/${roomId}/strokes`))
+    await set(ref(db, `${ROOMS_PATH}/${roomId}/clearAt`), Date.now())
   }, [roomId, clearCanvasLocal])
 
-  const nextRoundSolo = () => {
-    const word = getRandomWord()
-    setCurrentWord(word)
-    clearCanvasLocal()
-    setTimeLeft(ROUND_TIME)
-    setGameState(prev => ({
-      ...prev,
-      currentWord: word,
-      round: prev.round + 1,
+  const prepareRound = useCallback(async (drawerId, roundNumber) => {
+    if (!roomId) return
+    const options = getWordOptions()
+    await update(ref(db, `${ROOMS_PATH}/${roomId}`), {
+      drawer: drawerId,
+      round: roundNumber,
+      currentWord: '',
+      wordOptions: options,
       timeLeft: ROUND_TIME,
-    }))
+      guessedCorrectly: false,
+    })
+    await remove(ref(db, `${ROOMS_PATH}/${roomId}/chat`))
+    await clearCanvasForAll()
+  }, [roomId, clearCanvasForAll])
+
+  const createRoom = async () => {
+    if (!playerName.trim()) return
+    const roomRef = push(ref(db, ROOMS_PATH))
+    const newRoomId = roomRef.key
+    const initialState = {
+      status: 'waiting',
+      host: playerId,
+      hostName: playerName,
+      guest: '',
+      guestName: '',
+      hostScore: 0,
+      guestScore: 0,
+      drawer: playerId,
+      round: 1,
+      currentWord: '',
+      wordOptions: [],
+      timeLeft: ROUND_TIME,
+      guessedCorrectly: false,
+    }
+    await set(roomRef, initialState)
+    setRoomId(newRoomId)
+    setIsHost(true)
+    setJoined(true)
   }
 
-  const nextRound = async () => {
-    if (roomId === 'solo') {
-      nextRoundSolo()
+  const joinRoom = async () => {
+    if (!playerName.trim() || !roomId.trim()) return
+    const roomRef = ref(db, `${ROOMS_PATH}/${roomId}`)
+    const snapshot = await get(roomRef)
+    if (!snapshot.exists()) {
+      alert('Camera nu exista!')
       return
     }
-    const word = getRandomWord()
-    const newDrawer = gameState?.drawer === gameState?.host ? gameState?.guest : gameState?.host
-    await set(ref(db, `pictionary-rooms/${roomId}/currentWord`), word)
-    await set(ref(db, `pictionary-rooms/${roomId}/drawer`), newDrawer)
-    await set(ref(db, `pictionary-rooms/${roomId}/round`), (gameState?.round || 1) + 1)
-    await set(ref(db, `pictionary-rooms/${roomId}/timeLeft`), ROUND_TIME)
-    await set(ref(db, `pictionary-rooms/${roomId}/guessedCorrectly`), false)
-    remove(ref(db, `pictionary-rooms/${roomId}/chat`))
-    await clearCanvasForAll()
+    const data = snapshot.val()
+    if (data.guest) {
+      alert('Camera este plina!')
+      return
+    }
+    await update(ref(db, `${ROOMS_PATH}/${roomId}`), {
+      guest: playerId,
+      guestName: playerName,
+      status: 'playing',
+    })
+    setJoined(true)
+    setIsHost(false)
   }
 
   useEffect(() => {
-    if (!gameState || roomId === 'solo' || gameState.status !== 'playing') return
+    if (!joined || !roomId) return
+    const roomRef = ref(db, `${ROOMS_PATH}/${roomId}`)
+    const unsubscribe = onValue(roomRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.val()
+        setGameState(data)
+        setIsDrawing(data.drawer === playerId)
+        setWordOptions(Array.isArray(data.wordOptions) ? data.wordOptions : [])
+      }
+    })
+    return () => unsubscribe()
+  }, [joined, roomId, playerId])
+
+  useEffect(() => {
+    if (!joined || !roomId) return
+    const chatRef = ref(db, `${ROOMS_PATH}/${roomId}/chat`)
+    const unsubscribe = onValue(chatRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const msgs = Object.values(snapshot.val())
+        setChatMessages(msgs)
+      } else {
+        setChatMessages([])
+      }
+    })
+    return () => unsubscribe()
+  }, [joined, roomId])
+
+  useEffect(() => {
+    if (!gameState || gameState.status !== 'playing') return
+    if (playerId !== gameState.host) return
+    if (!gameState.guest) return
+    if (gameState.currentWord) return
+    if (Array.isArray(gameState.wordOptions) && gameState.wordOptions.length > 0) return
+    prepareRound(gameState.drawer || gameState.host, gameState.round || 1)
+  }, [gameState, playerId, prepareRound])
+
+  const selectWord = async (word) => {
+    if (!isDrawing || !roomId) return
+    if (!word) return
+    await update(ref(db, `${ROOMS_PATH}/${roomId}`), {
+      currentWord: word,
+      wordOptions: [],
+      timeLeft: ROUND_TIME,
+      guessedCorrectly: false,
+    })
+    setCustomWord('')
+  }
+
+  const applyCustomWord = async () => {
+    const word = customWord.trim()
+    if (!word) return
+    await selectWord(word)
+  }
+
+  const sendGuess = async () => {
+    if (!guess.trim() || !roomId || !gameState?.currentWord) return
+    if (isDrawing) return
+
+    const isCorrect = normalizeText(guess) === normalizeText(gameState.currentWord)
+    await push(ref(db, `${ROOMS_PATH}/${roomId}/chat`), {
+      player: playerName,
+      message: guess,
+      correct: isCorrect,
+      timestamp: Date.now(),
+    })
+
+    if (isCorrect) {
+      const drawerKey = gameState.drawer === gameState.host ? 'hostScore' : 'guestScore'
+      const guesserKey = isHost ? 'hostScore' : 'guestScore'
+      const updates = {
+        guessedCorrectly: true,
+      }
+      if (drawerKey === guesserKey) {
+        updates[guesserKey] = (gameState[guesserKey] || 0) + 1
+      } else {
+        updates[guesserKey] = (gameState[guesserKey] || 0) + 1
+        updates[drawerKey] = (gameState[drawerKey] || 0) + 1
+      }
+      await update(ref(db, `${ROOMS_PATH}/${roomId}`), updates)
+      await push(ref(db, `${ROOMS_PATH}/${roomId}/chat`), {
+        player: 'Sistem',
+        message: `✅ ${playerName} a ghicit! Cuvantul era: ${gameState.currentWord}`,
+        system: true,
+        timestamp: Date.now(),
+      })
+    }
+    setGuess('')
+  }
+
+  useEffect(() => {
+    if (!gameState || gameState.status !== 'playing') return
     if (!gameState.guessedCorrectly) return
     if (playerId !== gameState.host) return
+    if (!gameState.guest) return
     if (advanceRoundRef.current === gameState.round) return
     advanceRoundRef.current = gameState.round
-    setTimeout(() => nextRound(), 500)
-  }, [gameState?.guessedCorrectly, gameState?.round, gameState?.status, roomId, playerId])
+
+    const nextDrawer = gameState.drawer === gameState.host ? gameState.guest : gameState.host
+    setTimeout(() => prepareRound(nextDrawer, (gameState.round || 1) + 1), 800)
+  }, [gameState?.guessedCorrectly, gameState?.round, gameState?.status, gameState?.drawer, gameState?.host, gameState?.guest, playerId, prepareRound])
 
   useEffect(() => {
-    if (gameState?.status !== 'playing') return
-    if (roomId === 'solo') {
-      timerRef.current = setInterval(() => {
-        setTimeLeft(prev => {
-          if (prev <= 1) {
-            clearInterval(timerRef.current)
-            setChatMessages(msgs => [...msgs, {
-              player: 'Sistem',
-              message: `⏰ Timpul a expirat! Cuvântul era: ${currentWord}`,
-              system: true,
-              timestamp: Date.now(),
-            }])
-            setTimeout(() => nextRoundSolo(), 2000)
-            return 0
-          }
-          return prev - 1
-        })
-      }, 1000)
-      return () => clearInterval(timerRef.current)
-    }
-  }, [gameState?.status, gameState?.round, roomId])
+    if (!gameState || gameState.status !== 'playing') return
+    if (!isHost || !roomId) return
+    if (!gameState.currentWord || gameState.guessedCorrectly) return
 
-  useEffect(() => {
-    if (!gameState || roomId === 'solo' || gameState.status !== 'playing') return
-    if (gameState.guessedCorrectly) return
     const interval = setInterval(async () => {
-      const current = await get(ref(db, `pictionary-rooms/${roomId}/timeLeft`))
+      const current = await get(ref(db, `${ROOMS_PATH}/${roomId}/timeLeft`))
       const val = current.val()
       if (val && val > 0) {
-        await set(ref(db, `pictionary-rooms/${roomId}/timeLeft`), val - 1)
+        await set(ref(db, `${ROOMS_PATH}/${roomId}/timeLeft`), val - 1)
       } else if (val === 0) {
-        push(ref(db, `pictionary-rooms/${roomId}/chat`), {
+        await update(ref(db, `${ROOMS_PATH}/${roomId}`), { guessedCorrectly: true })
+        await push(ref(db, `${ROOMS_PATH}/${roomId}/chat`), {
           player: 'Sistem',
-          message: `⏰ Timpul a expirat! Cuvântul era: ${gameState.currentWord}`,
+          message: `⏰ Timpul a expirat! Cuvantul era: ${gameState.currentWord}`,
           system: true,
           timestamp: Date.now(),
         })
-        setTimeout(() => nextRound(), 2000)
       }
     }, 1000)
+
     return () => clearInterval(interval)
-  }, [gameState?.status, gameState?.round, gameState?.guessedCorrectly])
+  }, [gameState?.status, gameState?.currentWord, gameState?.guessedCorrectly, isHost, roomId])
 
   const drawStroke = useCallback((stroke) => {
     const canvas = canvasRef.current
@@ -374,8 +318,8 @@ export default function Pictionary() {
   }, [joined, gameState?.status, initCanvas])
 
   useEffect(() => {
-    if (!roomId || roomId === 'solo') return
-    const strokesRef = ref(db, `pictionary-rooms/${roomId}/strokes`)
+    if (!roomId) return
+    const strokesRef = ref(db, `${ROOMS_PATH}/${roomId}/strokes`)
     const unsubscribe = onChildAdded(strokesRef, (snapshot) => {
       const stroke = snapshot.val()
       if (!stroke || stroke.playerId === playerId) return
@@ -388,8 +332,8 @@ export default function Pictionary() {
   }, [roomId, playerId, drawStroke])
 
   useEffect(() => {
-    if (!roomId || roomId === 'solo') return
-    const clearRef = ref(db, `pictionary-rooms/${roomId}/clearAt`)
+    if (!roomId) return
+    const clearRef = ref(db, `${ROOMS_PATH}/${roomId}/clearAt`)
     const unsubscribe = onValue(clearRef, (snapshot) => {
       const val = snapshot.val()
       if (val && val !== lastClearRef.current) {
@@ -411,15 +355,17 @@ export default function Pictionary() {
     }
   }
 
+  const canDraw = isDrawing && gameState?.currentWord
+
   const startDraw = (e) => {
-    if (!isDrawing) return
+    if (!canDraw) return
     e.preventDefault()
     drawingRef.current = true
     lastPosRef.current = getCanvasPos(e)
   }
 
   const draw = (e) => {
-    if (!isDrawing) return
+    if (!canDraw) return
     e.preventDefault()
     if (!drawingRef.current) return
     const canvas = canvasRef.current
@@ -436,10 +382,10 @@ export default function Pictionary() {
     ctx.lineJoin = 'round'
     ctx.stroke()
 
-    if (roomId !== 'solo') {
+    if (roomId) {
       const width = canvas.width || 1
       const height = canvas.height || 1
-      push(ref(db, `pictionary-rooms/${roomId}/strokes`), {
+      push(ref(db, `${ROOMS_PATH}/${roomId}/strokes`), {
         playerId,
         fx: from.x / width,
         fy: from.y / height,
@@ -462,12 +408,14 @@ export default function Pictionary() {
   }
 
   const clearCanvas = () => {
-    clearCanvasForAll()
+    if (isDrawing) {
+      clearCanvasForAll()
+    }
   }
 
   const cancelSearch = useCallback(() => {
     setSearching(false)
-    leaveLobby('pictionary', playerId)
+    leaveLobby(GAME_ID, playerId)
     if (matchUnsubRef.current) {
       matchUnsubRef.current()
       matchUnsubRef.current = null
@@ -477,11 +425,10 @@ export default function Pictionary() {
   const findOnlinePlayer = useCallback(async () => {
     if (!playerName.trim()) return
     setSearching(true)
-    const word = getRandomWord()
-    const result = await joinLobby('pictionary', playerId, playerName)
+    const result = await joinLobby(GAME_ID, playerId, playerName)
     if (result.matched) {
       setSearching(false)
-      const roomRef = push(ref(db, 'pictionary-rooms'))
+      const roomRef = push(ref(db, ROOMS_PATH))
       const newRoomId = roomRef.key
       const initialState = {
         status: 'playing',
@@ -491,14 +438,15 @@ export default function Pictionary() {
         guestName: result.playerName,
         hostScore: 0,
         guestScore: 0,
-        currentWord: word,
         drawer: playerId,
         round: 1,
+        currentWord: '',
+        wordOptions: [],
         timeLeft: ROUND_TIME,
         guessedCorrectly: false,
       }
       await set(roomRef, initialState)
-      await setLobbyMatch('pictionary', result.playerId, {
+      await setLobbyMatch(GAME_ID, result.playerId, {
         roomId: newRoomId,
         host: playerId,
         hostName: playerName,
@@ -508,10 +456,8 @@ export default function Pictionary() {
       setRoomId(newRoomId)
       setIsHost(true)
       setJoined(true)
-      setCurrentWord(word)
-      setIsDrawing(true)
     } else {
-      matchUnsubRef.current = listenForLobbyMatch('pictionary', playerId, async (matched) => {
+      matchUnsubRef.current = listenForLobbyMatch(GAME_ID, playerId, async (matched) => {
         if (!matched) return
         if (matched.roomId) {
           setSearching(false)
@@ -519,11 +465,10 @@ export default function Pictionary() {
             matchUnsubRef.current()
             matchUnsubRef.current = null
           }
-          await leaveLobby('pictionary', playerId)
+          await leaveLobby(GAME_ID, playerId)
           setRoomId(matched.roomId)
           setIsHost(playerId === matched.host)
           setJoined(true)
-          setIsDrawing(playerId === matched.host)
           return
         }
 
@@ -534,8 +479,8 @@ export default function Pictionary() {
           matchUnsubRef.current()
           matchUnsubRef.current = null
         }
-        await leaveLobby('pictionary', playerId)
-        const roomRef = push(ref(db, 'pictionary-rooms'))
+        await leaveLobby(GAME_ID, playerId)
+        const roomRef = push(ref(db, ROOMS_PATH))
         const newRoomId = roomRef.key
         const initialState = {
           status: 'playing',
@@ -545,14 +490,15 @@ export default function Pictionary() {
           guestName: matched.playerName,
           hostScore: 0,
           guestScore: 0,
-          currentWord: word,
           drawer: playerId,
           round: 1,
+          currentWord: '',
+          wordOptions: [],
           timeLeft: ROUND_TIME,
           guessedCorrectly: false,
         }
         await set(roomRef, initialState)
-        await setLobbyMatch('pictionary', matched.playerId, {
+        await setLobbyMatch(GAME_ID, matched.playerId, {
           roomId: newRoomId,
           host: playerId,
           hostName: playerName,
@@ -562,23 +508,34 @@ export default function Pictionary() {
         setRoomId(newRoomId)
         setIsHost(true)
         setJoined(true)
-        setCurrentWord(word)
-        setIsDrawing(true)
       })
     }
   }, [playerName, playerId])
 
-  const resetGame = () => {
+  const resetGame = async () => {
     if (searching) cancelSearch()
-    if (roomId !== 'solo' && roomId) {
-      remove(ref(db, `pictionary-rooms/${roomId}`))
+    if (roomId && gameState) {
+      if (playerId === gameState.host) {
+        await remove(ref(db, `${ROOMS_PATH}/${roomId}`))
+      } else {
+        await update(ref(db, `${ROOMS_PATH}/${roomId}`), {
+          guest: '',
+          guestName: '',
+          status: 'waiting',
+          currentWord: '',
+          wordOptions: [],
+          guessedCorrectly: false,
+          timeLeft: ROUND_TIME,
+        })
+        await clearCanvasForAll()
+      }
     }
     setGameState(null)
     setJoined(false)
     setRoomId('')
     setChatMessages([])
-    setCurrentWord('')
-    setTimeLeft(ROUND_TIME)
+    setGuess('')
+    setCustomWord('')
   }
 
   if (!joined) {
@@ -588,31 +545,18 @@ export default function Pictionary() {
           <div className="inline-flex p-5 rounded-2xl bg-gradient-to-br from-blue-600 to-cyan-800 glow-blue mb-4">
             <Palette className="w-12 h-12 text-white" />
           </div>
-          <h1 className="game-title text-2xl text-blue-300 mb-2">DESENEAZĂ & GHICEȘTE</h1>
-          <p className="text-gray-400 text-sm">Desenează pe canvas, prietenii ghicesc cuvântul!</p>
+          <h1 className="game-title text-2xl text-blue-300 mb-2">SKRIBBL</h1>
+          <p className="text-gray-400 text-sm">Deseneaza pe rand si ghiceste cuvintele.</p>
         </div>
 
         <div className="space-y-4">
           <input
             type="text"
-            placeholder="Numele tău..."
+            placeholder="Numele tau..."
             value={playerName}
             onChange={(e) => setPlayerName(e.target.value)}
             className="w-full px-4 py-3 rounded-xl bg-gray-800/80 border border-blue-500/30 text-white placeholder-gray-500 focus:outline-none focus:border-blue-400"
           />
-
-          <button
-            onClick={playSolo}
-            className="w-full py-3 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-700 text-white font-bold hover:from-blue-500 hover:to-cyan-600 transition-all glow-blue"
-          >
-            🎨 Joacă Solo (Desenează & Ghicește)
-          </button>
-
-          <div className="flex items-center gap-3">
-            <div className="flex-1 h-px bg-blue-500/30"></div>
-            <span className="text-gray-500 text-xs">SAU MULTIPLAYER</span>
-            <div className="flex-1 h-px bg-blue-500/30"></div>
-          </div>
 
           <button
             onClick={findOnlinePlayer}
@@ -622,12 +566,12 @@ export default function Pictionary() {
             {searching ? (
               <>
                 <Search className="w-5 h-5 animate-spin" />
-                Căutăm jucător...
+                Cautam jucator...
               </>
             ) : (
               <>
                 <Search className="w-5 h-5" />
-                Caută jucător online
+                Cauta jucator rapid
               </>
             )}
           </button>
@@ -636,7 +580,7 @@ export default function Pictionary() {
               onClick={cancelSearch}
               className="w-full py-2 rounded-xl bg-red-500/20 border border-red-500/30 text-red-300 text-sm hover:bg-red-500/30 transition-all"
             >
-              Anulează căutarea
+              Anuleaza cautarea
             </button>
           )}
 
@@ -644,13 +588,13 @@ export default function Pictionary() {
             onClick={createRoom}
             className="w-full py-3 rounded-xl bg-blue-500/20 border border-blue-500/30 text-blue-300 font-bold hover:bg-blue-500/30 transition-all"
           >
-            🏠 Creează cameră
+            Creeaza camera privata
           </button>
 
           <div className="flex gap-2">
             <input
               type="text"
-              placeholder="ID cameră..."
+              placeholder="ID camera..."
               value={roomId}
               onChange={(e) => setRoomId(e.target.value)}
               className="flex-1 px-4 py-3 rounded-xl bg-gray-800/80 border border-blue-500/30 text-white placeholder-gray-500 focus:outline-none focus:border-blue-400"
@@ -659,7 +603,7 @@ export default function Pictionary() {
               onClick={joinRoom}
               className="px-6 py-3 rounded-xl bg-blue-500/20 border border-blue-500/30 text-blue-300 font-bold hover:bg-blue-500/30 transition-all"
             >
-              Intră
+              Intra
             </button>
           </div>
         </div>
@@ -667,14 +611,16 @@ export default function Pictionary() {
     )
   }
 
-  const displayTimeLeft = gameState?.timeLeft ?? timeLeft
+  const displayTimeLeft = gameState?.currentWord ? gameState?.timeLeft : null
+  const isChoosingWord = isDrawing && !gameState?.currentWord && wordOptions.length > 0
+  const drawerName = gameState?.drawer === gameState?.host ? gameState?.hostName : gameState?.guestName
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-6">
       {gameState?.status === 'waiting' && (
         <div className="text-center mb-6 p-6 rounded-xl bg-gray-800/80 border border-blue-500/30">
-          <p className="text-blue-300 mb-2">Așteptăm un jucător...</p>
-          <p className="text-gray-400 text-sm mb-2">ID cameră:</p>
+          <p className="text-blue-300 mb-2">Asteptam un jucator...</p>
+          <p className="text-gray-400 text-sm mb-2">ID camera:</p>
           <p className="game-title text-lg text-blue-300 break-all">{roomId}</p>
         </div>
       )}
@@ -688,19 +634,39 @@ export default function Pictionary() {
               <span className="text-gray-300">
                 Scor: <span className="text-blue-300">{gameState.hostScore}</span> - <span className="text-red-300">{gameState.guestScore}</span>
               </span>
+              {drawerName && (
+                <span className="text-gray-400 text-sm">Deseneaza: {drawerName}</span>
+              )}
             </div>
             <div className="flex items-center gap-2">
               <Clock className="w-5 h-5 text-yellow-400" />
-              <span className={`game-title text-lg ${displayTimeLeft <= 10 ? 'text-red-400 animate-pulse' : 'text-white'}`}>
-                {displayTimeLeft}s
+              <span className={`game-title text-lg ${displayTimeLeft !== null && displayTimeLeft <= 10 ? 'text-red-400 animate-pulse' : 'text-white'}`}>
+                {displayTimeLeft === null ? '--' : `${displayTimeLeft}s`}
               </span>
             </div>
           </div>
 
-          {isDrawing && currentWord && (
+          {isChoosingWord && (
+            <div className="mb-4 p-4 rounded-lg bg-blue-500/10 border border-blue-500/30">
+              <p className="text-blue-300 text-sm mb-2">Alege cuvantul:</p>
+              <div className="flex flex-wrap gap-2">
+                {wordOptions.map((word) => (
+                  <button
+                    key={word}
+                    onClick={() => selectWord(word)}
+                    className="px-4 py-2 rounded-lg bg-blue-500/20 border border-blue-500/30 text-blue-200 hover:bg-blue-500/30 transition-all text-sm"
+                  >
+                    {word}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {isDrawing && gameState?.currentWord && (
             <div className="text-center mb-4 p-3 rounded-lg bg-blue-500/10 border border-blue-500/30">
-              <span className="text-gray-400 text-sm">Cuvânt de desenat: </span>
-              <span className="game-title text-lg text-blue-300">{currentWord}</span>
+              <span className="text-gray-400 text-sm">Cuvant de desenat: </span>
+              <span className="game-title text-lg text-blue-300">{gameState.currentWord}</span>
             </div>
           )}
 
@@ -708,7 +674,7 @@ export default function Pictionary() {
             <div className="mb-3 flex flex-col sm:flex-row gap-2">
               <input
                 type="text"
-                placeholder="Setează cuvântul (opțional)..."
+                placeholder="Seteaza cuvantul manual..."
                 value={customWord}
                 onChange={(e) => setCustomWord(e.target.value)}
                 className="flex-1 px-4 py-2 rounded-lg bg-gray-800/80 border border-blue-500/30 text-white placeholder-gray-500 focus:outline-none focus:border-blue-400 text-sm"
@@ -717,17 +683,23 @@ export default function Pictionary() {
                 onClick={applyCustomWord}
                 className="px-4 py-2 rounded-lg bg-blue-500/20 border border-blue-500/30 text-blue-300 hover:bg-blue-500/30 transition-all text-sm"
               >
-                Setează
+                Seteaza
               </button>
             </div>
           )}
 
           {!isDrawing && (
             <div className="text-center mb-4 p-3 rounded-lg bg-orange-500/10 border border-orange-500/30">
-              <span className="text-orange-300 text-sm">Tu ghicești! Privește desenul și scrie răspunsul.</span>
-              <span className="text-gray-400 text-sm ml-2">
-                ({gameState.currentWord?.length} litere: {gameState.currentWord?.split('').map(() => '_ ').join('')})
-              </span>
+              {gameState?.currentWord ? (
+                <>
+                  <span className="text-orange-300 text-sm">Tu ghicesti! Privește desenul si scrie raspunsul.</span>
+                  <span className="text-gray-400 text-sm ml-2">
+                    ({gameState.currentWord?.length} litere: {gameState.currentWord?.split('').map(() => '_ ').join('')})
+                  </span>
+                </>
+              ) : (
+                <span className="text-orange-300 text-sm">Asteptam ca desenatorul sa aleaga cuvantul...</span>
+              )}
             </div>
           )}
 
@@ -805,15 +777,15 @@ export default function Pictionary() {
                   </div>
                 ))}
                 {chatMessages.length === 0 && (
-                  <p className="text-gray-600 text-xs">Niciun mesaj încă...</p>
+                  <p className="text-gray-600 text-xs">Niciun mesaj inca...</p>
                 )}
               </div>
 
-              {!isDrawing && (
+              {!isDrawing && gameState?.currentWord && (
                 <div className="flex gap-2">
                   <input
                     type="text"
-                    placeholder="Ghicește cuvântul..."
+                    placeholder="Ghicește cuvantul..."
                     value={guess}
                     onChange={(e) => setGuess(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && sendGuess()}
@@ -835,7 +807,7 @@ export default function Pictionary() {
             className="mt-6 px-4 py-2 rounded-lg bg-gray-700/50 text-gray-400 text-sm hover:bg-gray-700 transition-all"
           >
             <RotateCcw className="w-4 h-4 inline mr-1" />
-            Ieși din joc
+            Iesi din joc
           </button>
         </>
       )}
