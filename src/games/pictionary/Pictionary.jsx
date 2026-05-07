@@ -42,6 +42,8 @@ export default function Pictionary() {
   const [searching, setSearching] = useState(false)
   const matchUnsubRef = useRef(null)
   const lastClearRef = useRef(0)
+  const canvasReadyRef = useRef(false)
+  const strokesCacheRef = useRef([])
 
   const getRandomWord = () => WORDS_RO[Math.floor(Math.random() * WORDS_RO.length)]
 
@@ -205,6 +207,7 @@ export default function Pictionary() {
     const ctx = canvas.getContext('2d')
     ctx.fillStyle = '#1a1a2e'
     ctx.fillRect(0, 0, canvas.width, canvas.height)
+    strokesCacheRef.current = []
   }, [])
 
   const clearCanvasForAll = useCallback(async () => {
@@ -287,23 +290,6 @@ export default function Pictionary() {
     return () => clearInterval(interval)
   }, [gameState?.status, gameState?.round])
 
-  const initCanvas = useCallback(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const rect = canvas.getBoundingClientRect()
-    canvas.width = rect.width
-    canvas.height = rect.height
-    const ctx = canvas.getContext('2d')
-    ctx.fillStyle = '#1a1a2e'
-    ctx.fillRect(0, 0, canvas.width, canvas.height)
-  }, [])
-
-  useEffect(() => {
-    if (joined) {
-      setTimeout(initCanvas, 100)
-    }
-  }, [joined, gameState?.status, initCanvas])
-
   const drawStroke = useCallback((stroke) => {
     const canvas = canvasRef.current
     if (!canvas || !stroke) return
@@ -324,13 +310,39 @@ export default function Pictionary() {
     ctx.stroke()
   }, [])
 
+  const initCanvas = useCallback(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const rect = canvas.getBoundingClientRect()
+    canvas.width = rect.width
+    canvas.height = rect.height
+    const ctx = canvas.getContext('2d')
+    ctx.fillStyle = '#1a1a2e'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    canvasReadyRef.current = true
+
+    const cached = strokesCacheRef.current
+    if (cached.length > 0) {
+      cached.forEach((stroke) => drawStroke(stroke))
+    }
+  }, [drawStroke])
+
+  useEffect(() => {
+    if (joined) {
+      setTimeout(initCanvas, 100)
+    }
+  }, [joined, gameState?.status, initCanvas])
+
   useEffect(() => {
     if (!roomId || roomId === 'solo') return
     const strokesRef = ref(db, `pictionary-rooms/${roomId}/strokes`)
     const unsubscribe = onChildAdded(strokesRef, (snapshot) => {
       const stroke = snapshot.val()
       if (!stroke || stroke.playerId === playerId) return
-      drawStroke(stroke)
+      strokesCacheRef.current.push(stroke)
+      if (canvasReadyRef.current) {
+        drawStroke(stroke)
+      }
     })
     return () => unsubscribe()
   }, [roomId, playerId, drawStroke])
