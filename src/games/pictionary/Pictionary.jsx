@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { ref, set, onValue, push, remove, get } from 'firebase/database'
+import { ref, set, onValue, onChildAdded, push, remove, get } from 'firebase/database'
 import { db } from '../../firebase'
 import { joinLobby, leaveLobby, listenForLobbyMatch, setLobbyMatch } from '../../utils/matchmaking'
 import { Palette, Send, Clock, Users, Eraser, RotateCcw, Pencil, Search } from 'lucide-react'
@@ -41,6 +41,7 @@ export default function Pictionary() {
   const timerRef = useRef(null)
   const [searching, setSearching] = useState(false)
   const matchUnsubRef = useRef(null)
+  const lastClearRef = useRef(0)
 
   const getRandomWord = () => WORDS_RO[Math.floor(Math.random() * WORDS_RO.length)]
 
@@ -198,10 +199,26 @@ export default function Pictionary() {
     setGuess('')
   }
 
+  const clearCanvasLocal = useCallback(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    ctx.fillStyle = '#1a1a2e'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+  }, [])
+
+  const clearCanvasForAll = useCallback(async () => {
+    clearCanvasLocal()
+    if (roomId && roomId !== 'solo') {
+      await remove(ref(db, `pictionary-rooms/${roomId}/strokes`))
+      await set(ref(db, `pictionary-rooms/${roomId}/clearAt`), Date.now())
+    }
+  }, [roomId, clearCanvasLocal])
+
   const nextRoundSolo = () => {
     const word = getRandomWord()
     setCurrentWord(word)
-    clearCanvas()
+    clearCanvasLocal()
     setTimeLeft(ROUND_TIME)
     setGameState(prev => ({
       ...prev,
@@ -224,7 +241,7 @@ export default function Pictionary() {
     await set(ref(db, `pictionary-rooms/${roomId}/timeLeft`), ROUND_TIME)
     await set(ref(db, `pictionary-rooms/${roomId}/guessedCorrectly`), false)
     remove(ref(db, `pictionary-rooms/${roomId}/chat`))
-    clearCanvas()
+    await clearCanvasForAll()
   }
 
   useEffect(() => {
@@ -282,10 +299,54 @@ export default function Pictionary() {
   }, [])
 
   useEffect(() => {
-    if (joined && isDrawing) {
+    if (joined) {
       setTimeout(initCanvas, 100)
     }
-  }, [joined, isDrawing, initCanvas])
+  }, [joined, gameState?.status, initCanvas])
+
+  const drawStroke = useCallback((stroke) => {
+    const canvas = canvasRef.current
+    if (!canvas || !stroke) return
+    const ctx = canvas.getContext('2d')
+    const scale = stroke.bw ? canvas.width / stroke.bw : 1
+    const fromX = (stroke.fx ?? 0) * canvas.width
+    const fromY = (stroke.fy ?? 0) * canvas.height
+    const toX = (stroke.tx ?? 0) * canvas.width
+    const toY = (stroke.ty ?? 0) * canvas.height
+
+    ctx.beginPath()
+    ctx.moveTo(fromX, fromY)
+    ctx.lineTo(toX, toY)
+    ctx.strokeStyle = stroke.erasing ? '#1a1a2e' : stroke.color
+    ctx.lineWidth = (stroke.size || 4) * scale * (stroke.erasing ? 3 : 1)
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
+    ctx.stroke()
+  }, [])
+
+  useEffect(() => {
+    if (!roomId || roomId === 'solo') return
+    const strokesRef = ref(db, `pictionary-rooms/${roomId}/strokes`)
+    const unsubscribe = onChildAdded(strokesRef, (snapshot) => {
+      const stroke = snapshot.val()
+      if (!stroke || stroke.playerId === playerId) return
+      drawStroke(stroke)
+    })
+    return () => unsubscribe()
+  }, [roomId, playerId, drawStroke])
+
+  useEffect(() => {
+    if (!roomId || roomId === 'solo') return
+    const clearRef = ref(db, `pictionary-rooms/${roomId}/clearAt`)
+    const unsubscribe = onValue(clearRef, (snapshot) => {
+      const val = snapshot.val()
+      if (val && val !== lastClearRef.current) {
+        lastClearRef.current = val
+        clearCanvasLocal()
+      }
+    })
+    return () => unsubscribe()
+  }, [roomId, clearCanvasLocal])
 
   const getCanvasPos = (e) => {
     const canvas = canvasRef.current
@@ -299,26 +360,47 @@ export default function Pictionary() {
   }
 
   const startDraw = (e) => {
+    if (!isDrawing) return
     e.preventDefault()
     drawingRef.current = true
     lastPosRef.current = getCanvasPos(e)
   }
 
   const draw = (e) => {
+    if (!isDrawing) return
     e.preventDefault()
     if (!drawingRef.current) return
     const canvas = canvasRef.current
     const ctx = canvas.getContext('2d')
     const pos = getCanvasPos(e)
 
+    const from = lastPosRef.current
     ctx.beginPath()
-    ctx.moveTo(lastPosRef.current.x, lastPosRef.current.y)
+    ctx.moveTo(from.x, from.y)
     ctx.lineTo(pos.x, pos.y)
     ctx.strokeStyle = isErasing ? '#1a1a2e' : brushColor
     ctx.lineWidth = isErasing ? brushSize * 3 : brushSize
     ctx.lineCap = 'round'
     ctx.lineJoin = 'round'
     ctx.stroke()
+
+    if (roomId !== 'solo') {
+      const width = canvas.width || 1
+      const height = canvas.height || 1
+      push(ref(db, `pictionary-rooms/${roomId}/strokes`), {
+        playerId,
+        fx: from.x / width,
+        fy: from.y / height,
+        tx: pos.x / width,
+        ty: pos.y / height,
+        color: brushColor,
+        size: brushSize,
+        erasing: isErasing,
+        bw: width,
+        bh: height,
+        ts: Date.now(),
+      })
+    }
 
     lastPosRef.current = pos
   }
@@ -328,11 +410,7 @@ export default function Pictionary() {
   }
 
   const clearCanvas = () => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const ctx = canvas.getContext('2d')
-    ctx.fillStyle = '#1a1a2e'
-    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    clearCanvasForAll()
   }
 
   const cancelSearch = useCallback(() => {
