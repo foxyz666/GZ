@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { ref, set, onValue, push, remove, get } from 'firebase/database'
 import { db } from '../../firebase'
-import { joinLobby, leaveLobby, listenForLobbyMatch } from '../../utils/matchmaking'
+import { joinLobby, leaveLobby, listenForLobbyMatch, setLobbyMatch } from '../../utils/matchmaking'
 import { Brain, Play, RotateCcw, Skull, Trophy, Volume2, Search } from 'lucide-react'
 
 const COLORS_SEQUENCE = [
@@ -247,11 +247,34 @@ export default function MemoryGame() {
         hostFailed: false,
         guestFailed: false,
       })
+      await setLobbyMatch('memory', result.playerId, {
+        roomId: newRoomId,
+        host: playerId,
+        hostName: playerName,
+        guest: result.playerId,
+        guestName: result.playerName,
+      })
       setRoomId(newRoomId)
       setIsHost(true)
       setJoined(true)
     } else {
       matchUnsubRef.current = listenForLobbyMatch('memory', playerId, async (matched) => {
+        if (!matched) return
+        if (matched.roomId) {
+          setSearching(false)
+          if (matchUnsubRef.current) {
+            matchUnsubRef.current()
+            matchUnsubRef.current = null
+          }
+          await leaveLobby('memory', playerId)
+          setRoomId(matched.roomId)
+          setIsHost(playerId === matched.host)
+          setJoined(true)
+          return
+        }
+
+        if (playerId > matched.playerId) return
+
         setSearching(false)
         if (matchUnsubRef.current) {
           matchUnsubRef.current()
@@ -262,17 +285,24 @@ export default function MemoryGame() {
         const newRoomId = roomRef.key
         await set(roomRef, {
           status: 'playing',
-          host: matched.playerId,
-          hostName: matched.playerName,
-          guest: playerId,
-          guestName: playerName,
+          host: playerId,
+          hostName: playerName,
+          guest: matched.playerId,
+          guestName: matched.playerName,
           hostLevel: 0,
           guestLevel: 0,
           hostFailed: false,
           guestFailed: false,
         })
+        await setLobbyMatch('memory', matched.playerId, {
+          roomId: newRoomId,
+          host: playerId,
+          hostName: playerName,
+          guest: matched.playerId,
+          guestName: matched.playerName,
+        })
         setRoomId(newRoomId)
-        setIsHost(false)
+        setIsHost(true)
         setJoined(true)
       })
     }

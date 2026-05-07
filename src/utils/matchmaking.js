@@ -33,13 +33,12 @@ export async function joinLobby(gameId, playerId, playerName) {
   if (snapshot.exists()) {
     const lobby = snapshot.val()
     const waitingPlayers = Object.entries(lobby).filter(
-      ([id, data]) => id !== playerId && Date.now() - data.timestamp < 60000
+      ([id, data]) => id !== playerId && Date.now() - data.timestamp < 60000 && !data.match
     )
 
     if (waitingPlayers.length > 0) {
       const [matchedPlayerId, matchedPlayerData] = waitingPlayers[0]
 
-      await remove(ref(db, `${lobbyPath}/${matchedPlayerId}`))
       await remove(ref(db, `${lobbyPath}/${playerId}`))
 
       return {
@@ -67,6 +66,15 @@ export async function leaveLobby(gameId, playerId) {
   await remove(ref(db, `${lobbyPath}/${playerId}`))
 }
 
+export async function setLobbyMatch(gameId, waitingPlayerId, matchData) {
+  const lobbyPath = getLobbyPath(gameId)
+  if (!lobbyPath) return
+  await update(ref(db, `${lobbyPath}/${waitingPlayerId}`), {
+    match: matchData,
+    matchTimestamp: Date.now(),
+  })
+}
+
 export function listenForLobbyMatch(gameId, playerId, onMatch) {
   const lobbyPath = getLobbyPath(gameId)
   if (!lobbyPath) return () => {}
@@ -75,16 +83,22 @@ export function listenForLobbyMatch(gameId, playerId, onMatch) {
   const unsubscribe = onValue(lobbyRef, (snapshot) => {
     if (!snapshot.exists()) return
     const lobby = snapshot.val()
-    if (lobby[playerId]) {
-      const waitingPlayers = Object.entries(lobby).filter(
-        ([id, data]) => id !== playerId && Date.now() - data.timestamp < 60000
-      )
-      if (waitingPlayers.length > 0) {
-        onMatch({
-          playerId: waitingPlayers[0][0],
-          playerName: waitingPlayers[0][1].name,
-        })
-      }
+    const selfEntry = lobby[playerId]
+    if (!selfEntry) return
+
+    if (selfEntry.match && selfEntry.match.roomId) {
+      onMatch(selfEntry.match)
+      return
+    }
+
+    const waitingPlayers = Object.entries(lobby).filter(
+      ([id, data]) => id !== playerId && Date.now() - data.timestamp < 60000 && !data.match
+    )
+    if (waitingPlayers.length > 0) {
+      onMatch({
+        playerId: waitingPlayers[0][0],
+        playerName: waitingPlayers[0][1].name,
+      })
     }
   })
   return unsubscribe
@@ -107,7 +121,7 @@ export function listenForPlayerCount(gameId, onCount) {
     if (snapshot.exists()) {
       const lobby = snapshot.val()
       lobbyCount = Object.values(lobby).filter(
-        (data) => Date.now() - data.timestamp < 60000
+        (data) => Date.now() - data.timestamp < 60000 && !data.match
       ).length
     } else {
       lobbyCount = 0

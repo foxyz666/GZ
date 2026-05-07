@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { ref, set, onValue, push, remove, get } from 'firebase/database'
 import { db } from '../../firebase'
-import { joinLobby, leaveLobby, listenForLobbyMatch } from '../../utils/matchmaking'
+import { joinLobby, leaveLobby, listenForLobbyMatch, setLobbyMatch } from '../../utils/matchmaking'
 import { MessageCircle, Send, RotateCcw, Sparkles, Laugh, Search } from 'lucide-react'
 
 const STARTERS = [
@@ -200,12 +200,35 @@ export default function FinishSentence() {
         currentStarter: starter,
         turn: playerId,
       })
+      await setLobbyMatch('finish-sentence', result.playerId, {
+        roomId: newRoomId,
+        host: playerId,
+        hostName: playerName,
+        guest: result.playerId,
+        guestName: result.playerName,
+      })
       setRoomId(newRoomId)
       setIsHost(true)
       setJoined(true)
       setCurrentStarter(starter)
     } else {
       matchUnsubRef.current = listenForLobbyMatch('finish-sentence', playerId, async (matched) => {
+        if (!matched) return
+        if (matched.roomId) {
+          setSearching(false)
+          if (matchUnsubRef.current) {
+            matchUnsubRef.current()
+            matchUnsubRef.current = null
+          }
+          await leaveLobby('finish-sentence', playerId)
+          setRoomId(matched.roomId)
+          setIsHost(playerId === matched.host)
+          setJoined(true)
+          return
+        }
+
+        if (playerId > matched.playerId) return
+
         setSearching(false)
         if (matchUnsubRef.current) {
           matchUnsubRef.current()
@@ -216,15 +239,22 @@ export default function FinishSentence() {
         const newRoomId = roomRef.key
         await set(roomRef, {
           status: 'playing',
-          host: matched.playerId,
-          hostName: matched.playerName,
-          guest: playerId,
-          guestName: playerName,
+          host: playerId,
+          hostName: playerName,
+          guest: matched.playerId,
+          guestName: matched.playerName,
           currentStarter: starter,
-          turn: matched.playerId,
+          turn: playerId,
+        })
+        await setLobbyMatch('finish-sentence', matched.playerId, {
+          roomId: newRoomId,
+          host: playerId,
+          hostName: playerName,
+          guest: matched.playerId,
+          guestName: matched.playerName,
         })
         setRoomId(newRoomId)
-        setIsHost(false)
+        setIsHost(true)
         setJoined(true)
         setCurrentStarter(starter)
       })

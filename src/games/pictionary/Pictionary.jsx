@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { ref, set, onValue, push, remove, get } from 'firebase/database'
 import { db } from '../../firebase'
-import { joinLobby, leaveLobby, listenForLobbyMatch } from '../../utils/matchmaking'
+import { joinLobby, leaveLobby, listenForLobbyMatch, setLobbyMatch } from '../../utils/matchmaking'
 import { Palette, Send, Clock, Users, Eraser, RotateCcw, Pencil, Search } from 'lucide-react'
 
 const WORDS_RO = [
@@ -368,6 +368,13 @@ export default function Pictionary() {
         guessedCorrectly: false,
       }
       await set(roomRef, initialState)
+      await setLobbyMatch('pictionary', result.playerId, {
+        roomId: newRoomId,
+        host: playerId,
+        hostName: playerName,
+        guest: result.playerId,
+        guestName: result.playerName,
+      })
       setRoomId(newRoomId)
       setIsHost(true)
       setJoined(true)
@@ -375,6 +382,23 @@ export default function Pictionary() {
       setIsDrawing(true)
     } else {
       matchUnsubRef.current = listenForLobbyMatch('pictionary', playerId, async (matched) => {
+        if (!matched) return
+        if (matched.roomId) {
+          setSearching(false)
+          if (matchUnsubRef.current) {
+            matchUnsubRef.current()
+            matchUnsubRef.current = null
+          }
+          await leaveLobby('pictionary', playerId)
+          setRoomId(matched.roomId)
+          setIsHost(playerId === matched.host)
+          setJoined(true)
+          setIsDrawing(playerId === matched.host)
+          return
+        }
+
+        if (playerId > matched.playerId) return
+
         setSearching(false)
         if (matchUnsubRef.current) {
           matchUnsubRef.current()
@@ -385,23 +409,31 @@ export default function Pictionary() {
         const newRoomId = roomRef.key
         const initialState = {
           status: 'playing',
-          host: matched.playerId,
-          hostName: matched.playerName,
-          guest: playerId,
-          guestName: playerName,
+          host: playerId,
+          hostName: playerName,
+          guest: matched.playerId,
+          guestName: matched.playerName,
           hostScore: 0,
           guestScore: 0,
           currentWord: word,
-          drawer: matched.playerId,
+          drawer: playerId,
           round: 1,
           timeLeft: ROUND_TIME,
           guessedCorrectly: false,
         }
         await set(roomRef, initialState)
+        await setLobbyMatch('pictionary', matched.playerId, {
+          roomId: newRoomId,
+          host: playerId,
+          hostName: playerName,
+          guest: matched.playerId,
+          guestName: matched.playerName,
+        })
         setRoomId(newRoomId)
-        setIsHost(false)
+        setIsHost(true)
         setJoined(true)
-        setIsDrawing(false)
+        setCurrentWord(word)
+        setIsDrawing(true)
       })
     }
   }, [playerName, playerId])

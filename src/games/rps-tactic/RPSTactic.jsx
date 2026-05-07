@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { ref, set, onValue, push, remove, get } from 'firebase/database'
 import { db } from '../../firebase'
-import { joinLobby, leaveLobby, listenForLobbyMatch, createRoomWithGuest, getRoomPath } from '../../utils/matchmaking'
+import { joinLobby, leaveLobby, listenForLobbyMatch, setLobbyMatch, createRoomWithGuest, getRoomPath } from '../../utils/matchmaking'
 import { Zap, Eye, Swords, RotateCcw, Trophy, Heart, Sparkles, Search } from 'lucide-react'
 
 const CHOICES = { ROCK: 'rock', PAPER: 'paper', SCISSORS: 'scissors' }
@@ -246,11 +246,34 @@ export default function RPSTactic() {
         winner: '',
       }
       await set(roomRef, initialState)
+      await setLobbyMatch('rps-tactic', result.playerId, {
+        roomId: newRoomId,
+        host: playerId,
+        hostName: playerName,
+        guest: result.playerId,
+        guestName: result.playerName,
+      })
       setRoomId(newRoomId)
       setIsHost(true)
       setJoined(true)
     } else {
       matchUnsubRef.current = listenForLobbyMatch('rps-tactic', playerId, async (matched) => {
+        if (!matched) return
+        if (matched.roomId) {
+          setSearching(false)
+          if (matchUnsubRef.current) {
+            matchUnsubRef.current()
+            matchUnsubRef.current = null
+          }
+          await leaveLobby('rps-tactic', playerId)
+          setRoomId(matched.roomId)
+          setIsHost(playerId === matched.host)
+          setJoined(true)
+          return
+        }
+
+        if (playerId > matched.playerId) return
+
         setSearching(false)
         if (matchUnsubRef.current) {
           matchUnsubRef.current()
@@ -261,10 +284,10 @@ export default function RPSTactic() {
         const newRoomId = roomRef.key
         const initialState = {
           status: 'playing',
-          host: matched.playerId,
-          hostName: matched.playerName,
-          guest: playerId,
-          guestName: playerName,
+          host: playerId,
+          hostName: playerName,
+          guest: matched.playerId,
+          guestName: matched.playerName,
           hostScore: 0,
           guestScore: 0,
           hostEnergy: MAX_ENERGY,
@@ -277,8 +300,15 @@ export default function RPSTactic() {
           winner: '',
         }
         await set(roomRef, initialState)
+        await setLobbyMatch('rps-tactic', matched.playerId, {
+          roomId: newRoomId,
+          host: playerId,
+          hostName: playerName,
+          guest: matched.playerId,
+          guestName: matched.playerName,
+        })
         setRoomId(newRoomId)
-        setIsHost(false)
+        setIsHost(true)
         setJoined(true)
       })
     }
