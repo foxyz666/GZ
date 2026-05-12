@@ -3,10 +3,12 @@ import { db } from '../firebase'
 
 const GAME_LOBBY_PATHS = {
   'skribbl': 'lobby/skribbl',
+  'tictactoe': 'lobby/tictactoe',
 }
 
 const GAME_ROOM_PATHS = {
   'skribbl': 'skribbl-rooms',
+  'tictactoe': 'tictactoe-rooms',
 }
 
 export function getLobbyPath(gameId) {
@@ -50,6 +52,10 @@ export async function joinLobby(gameId, playerId, playerName) {
 
   const playerLobbyRef = ref(db, `${lobbyPath}/${playerId}`)
   onDisconnect(playerLobbyRef).remove()
+
+  // Track active rooms for cleanup if host disconnects
+  // This is a bit simplified, ideally each game handles its own room cleanup
+  // but we can add a generic hook if needed.
 
   return { matched: false }
 }
@@ -144,5 +150,9 @@ export function listenForPlayerCount(gameId, onCount) {
 
 export async function createRoomWithGuest(gameId, roomId, roomData) {
   const roomPath = getRoomPath(gameId)
-  await set(ref(db, `${roomPath}/${roomId}`), roomData)
+  const roomRef = ref(db, `${roomPath}/${roomId}`)
+  await set(roomRef, roomData)
+
+  // Cleanup room if host disconnects
+  onDisconnect(roomRef).remove()
 }

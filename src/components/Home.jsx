@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { Palette, ChevronRight, Users } from 'lucide-react'
+import { Palette, ChevronRight, Users, Grid3X3 } from 'lucide-react'
 import { listenForPlayerCount } from '../utils/matchmaking'
 
 const games = [
@@ -16,6 +16,18 @@ const games = [
     path: '/skribbl',
     features: ['Cuvinte la alegere', 'Chat live', 'Timer + Scor'],
   },
+  {
+    id: 'tictactoe',
+    title: 'X și 0',
+    subtitle: 'TIC-TAC-TOE',
+    description: 'Înfruntă-ți prietenii în clasicul joc X și 0. Strategie rapidă și distracție.',
+    icon: Grid3X3,
+    color: 'purple',
+    gradient: 'from-purple-600 to-indigo-800',
+    glowClass: 'glow-purple',
+    path: '/tictactoe',
+    features: ['Matchmaking', 'Live Chat', 'Sistem de Scor'],
+  },
 ]
 
 const colorMap = {
@@ -25,6 +37,13 @@ const colorMap = {
     border: 'border-blue-500/30',
     hoverBg: 'hover:bg-blue-500/30',
     tag: 'bg-blue-500/30 text-blue-200',
+  },
+  purple: {
+    bg: 'bg-purple-500/20',
+    text: 'text-purple-300',
+    border: 'border-purple-500/30',
+    hoverBg: 'hover:bg-purple-500/30',
+    tag: 'bg-purple-500/30 text-purple-200',
   },
 }
 
@@ -47,7 +66,7 @@ export default function Home() {
           GAME ZONE
         </h1>
         <p className="text-lg text-gray-400 max-w-2xl mx-auto">
-          Joc tip skribbl pentru prieteni: desenezi, ghicești și schimbi runde rapid.
+          Jocuri multiplayer pentru tine și prietenii tăi. Distracție garantată!
         </p>
       </div>
 

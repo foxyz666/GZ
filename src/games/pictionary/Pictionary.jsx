@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { ref, set, onValue, onChildAdded, push, remove, get, update } from 'firebase/database'
+import { ref, set, onValue, onChildAdded, push, remove, get, update, onDisconnect } from 'firebase/database'
 import { db } from '../../firebase'
 import { joinLobby, leaveLobby, listenForLobbyMatch, setLobbyMatch } from '../../utils/matchmaking'
 import { Palette, Send, Clock, Eraser, RotateCcw, Search } from 'lucide-react'
@@ -121,6 +121,7 @@ export default function Skribbl() {
       guessedCorrectly: false,
     }
     await set(roomRef, initialState)
+    onDisconnect(roomRef).remove()
     setRoomId(newRoomId)
     setIsHost(true)
     setJoined(true)
